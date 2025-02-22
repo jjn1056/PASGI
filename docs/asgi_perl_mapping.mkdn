@@ -1,0 +1,216 @@
+Here's a first draft of the documentation explaining how the ASGI protocol is mapped to Perl. This covers key areas such as request handling, concurrency model, and response processing. We can iterate on this as we refine the implementation.
+
+---
+
+### **Mapping ASGI to Perl: **
+
+This document describes how the Python ASGI protocol is mapped to Perl
+
+---
+
+## **1. ASGI Overview**
+ASGI (Asynchronous Server Gateway Interface) is a specification that extends WSGI by supporting asynchronous applications. The ASGI interface consists of:
+- **A callable application** that receives a `scope` (metadata about the connection).
+- **Two async functions (`receive` and `send`)** for handling messages.
+
+A typical ASGI application looks like this in Python:
+
+```python
+async def app(scope, receive, send):
+    event = await receive()
+    await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"text/plain")]})
+    await send({"type": "http.response.body", "body": b"Hello, world!"})
+```
+
+---
+
+## **2. Mapping ASGI to Perl**
+
+Perl does not natively support Python’s `async/await` pattern, but we can achieve similar functionality using **Futures** (from `Future.pm`) and **IO::Async** (from `IO::Async::Loop`).  Below is how we translate key ASGI components into Perl.
+
+### **2.1. Application Interface**
+The ASGI application callable is mapped to a **Perl subroutine** that takes:
+- A **hash reference (`$scope`)** representing the ASGI scope.
+- A **callback for receiving events (`$receive_cb`)**.
+- A **callback for sending responses (`$send_cb`)**.
+
+#### **Perl ASGI App Signature**
+```perl
+sub app {
+    my ($scope, $receive_cb, $send_cb) = @_;
+    
+    # Process incoming HTTP request
+    $receive_cb->()->then(sub {
+        my $event = shift;
+        
+        # Send response headers
+        return $send_cb->({
+            type    => "http.response.start",
+            status  => 200,
+            headers => [['content-type', 'text/plain']]
+        });
+    })->then(sub {
+        # Send response body
+        return $send_cb->({
+            type => "http.response.body",
+            body => "Hello, world!"
+        });
+    });
+}
+```
+- This function **returns a Future** that resolves once the response is fully sent.
+- It relies on `then()` chaining to mimic `await` behavior.
+
+Alternatively, we can leverage Future::AsyncAwait and replace the callback-based approach.
+
+```perl
+use Future::AsyncAwait;
+
+async sub app {
+    my ($scope, $receive_cb, $send_cb) = @_;
+
+    my $event = await $receive_cb->();
+
+    await $send_cb->({
+        type    => "http.response.start",
+        status  => 200,
+        headers => [['content-type', 'text/plain']]
+    });
+
+    await $send_cb->({
+        type => "http.response.body",
+        body => "Hello, world!"
+    });
+}
+```
+---
+
+### **2.2. Request Handling**
+ASGI supports multiple protocols (HTTP, WebSockets, etc.). These are mapped in Perl as follows:
+
+| ASGI Scope Key | Perl Representation |
+|---------------|--------------------|
+| `type` | `$scope->{type}` (e.g., `"http"` or `"websocket"`) |
+| `http_version` | `$scope->{http_version}` |
+| `method` | `$scope->{method}` (e.g., `"GET"`) |
+| `path` | `$scope->{path}` |
+| `query_string` | `$scope->{query_string}` |
+| `headers` | `$scope->{headers}` (arrayref of `["header", "value"]`) |
+
+Example **incoming request** as a Perl data structure:
+```perl
+{
+    type         => "http",
+    http_version => "1.1",
+    method       => "GET",
+    path         => "/",
+    query_string => "foo=bar",
+    headers      => [ ["host", "example.com"], ["user-agent", "Mozilla"] ],
+}
+```
+
+---
+
+### **2.3. Response Handling**
+Responses follow the ASGI structure:
+- **HTTP Start (`http.response.start`)**: Status code and headers.
+- **HTTP Body (`http.response.body`)**: Response body (can be sent in multiple chunks).
+
+Perl equivalent:
+```perl
+$send_cb->({
+    type    => "http.response.start",
+    status  => 200,
+    headers => [['content-type', 'text/plain']]
+})->then(sub {
+    return $send_cb->({
+        type => "http.response.body",
+        body => "Hello, world!"
+    });
+});
+```
+This follows the **IO::Async::Future** pattern for non-blocking execution.
+
+---
+
+### **2.4. Concurrency Model**
+ASGI supports **concurrent request handling**. In Perl:
+- **IO::Async is used as the event loop**.
+- **Futures handle async responses**.
+- **WebSockets and long polling use streaming Future objects**.
+
+Example **handling multiple concurrent requests**:
+```perl
+use IO::Async::Loop;
+my $loop = IO::Async::Loop->new;
+
+$loop->add(
+    IO::Async::Stream->new(
+        on_read => sub {
+            my ($self, $buffref) = @_;
+            process_request($buffref)->then(sub {
+                my $response = shift;
+                return $self->write($response);
+            });
+        }
+    )
+);
+
+$loop->run;
+```
+This ensures **non-blocking I/O** while handling multiple connections.
+
+---
+
+## **3. HTTP vs WebSockets**
+ASGI supports WebSockets (`ws`/`wss`), which require **stateful bidirectional communication**.
+
+### **3.1. WebSockets in ASGI**
+In ASGI, a WebSocket connection lifecycle has these events:
+1. **Connect** (`websocket.connect`)
+2. **Receive message** (`websocket.receive`)
+3. **Send message** (`websocket.send`)
+4. **Close connection** (`websocket.disconnect`)
+
+### **3.2. Perl WebSocket Handling**
+We can implement WebSockets in Perl using `IO::Async::Stream`:
+
+```perl
+sub websocket_app {
+    my ($scope, $receive_cb, $send_cb) = @_;
+    
+    # Accept WebSocket connection
+    $send_cb->({ type => "websocket.accept" })->then(sub {
+        return $receive_cb->();
+    })->then(sub {
+        my $event = shift;
+        
+        # Echo the received message back
+        return $send_cb->({
+            type => "websocket.send",
+            text => $event->{text}
+        });
+    });
+}
+```
+This **mirrors ASGI's WebSocket lifecycle** in an event-driven way.
+
+---
+
+## **4. Running the Perl ASGI App**
+We need an ASGI-compatible **server** that interacts with our Perl application.
+
+Example **IO::Async-based server**:
+```perl
+use IO::Async::Loop;
+use My::ASGI::Adapter;
+
+my $loop = IO::Async::Loop->new;
+my $server = My::ASGI::Adapter->new(app => \&app);
+
+$loop->add($server);
+$loop->run;
+```
+
+---
+
