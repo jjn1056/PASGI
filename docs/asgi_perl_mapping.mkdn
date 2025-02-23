@@ -17,9 +17,23 @@ framework developers.
 
 ## Introduction
 
+While work has been done to support asynchronous response handling in PSGI (the
+`psgi.nonblocking` environment key), support for protocols with multiple input
+events (such as WebSockets) remained hacks. The use of non-blocking or
+asynchronous handling based on PSGI never took off. The PSGI specification
+hasn't changed since July 2013. Since then, asynchronous programming in has
+taken off in many programming languages, including in Perl: although Perl
+does not natively support the `async/await` pattern like Python or JavaScript,
+the module `Future::AsyncAwait` implements the pattern since 24 January 2018
+for Perl versions 5.16 and up.
+
+---
+
 Perl does not natively support Python’s `async/await` pattern, but we can achieve similar
 functionality using **Futures** (from `Future.pm`) and **IO::Async** (from `IO::Async::Loop`).
 Below is how we translate key ASGI components into Perl.
+
+---
 
 ## Specification
 
