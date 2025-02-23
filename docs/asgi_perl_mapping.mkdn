@@ -82,6 +82,14 @@ code references to asynchronous functions (`async sub` or `sub` returning a Futu
 
 The content of `$scope` is defined in the next section.
 
+The entrypoint should throw an exception (by calling `die()`) to reject protocols
+they do not understand. (**is this efficient?? in some languages stack traces take _time_**)
+
+The application interacts with the server by iteratively receiving events from
+awaited `$receive_cb` invocations and sending events by through awaited
+`$send_cb` calls. When the application is done sending and receiving events, the
+asynchronous function returns.
+
 ### Scopes
 
 Scopes MUST be a hash reference. The following keys MUST be present:
