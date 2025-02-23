@@ -258,6 +258,27 @@ $loop->run;
 
 ## Terminology
 
+(unfortunately, GitHub flavored Markdown doesn't render definition lists)
+
+<dl>
+  <dt>APSGI</dt>
+  <dd>Asynchronous Perl Web Server Gateway Interface specification; this specification</dd>
+
+  <dt>APSGI Server</dt>
+  <dd>Component in the APSGI specification handling interaction with webservers;
+      abstracting web server request interfaces such as CGI, FastCGI or reverse proxied HTTP</dd>
+
+  <dt>Application</dt>
+  <dd>APSGI component implementing the standardized web application framework API</dd>
+
+  <dt>Middleware</dt>
+  <dd>Component implementing both the Application and APSGI Server APIs placing itself between
+      a server and an application.</dd>
+
+  <dt>Web server</dt>
+  <dd>Server handling (external) network request, usually HTTP requests.</dd>
+</dl>
+
 ## Changelog
 
 ## Acknowledgements
