@@ -125,6 +125,13 @@ module `APSGI::Protocol::http`.
 Names of events defined in protocols MUST be prefixed by the name of the protocol
 followed by a dot. That is, the name prefix for the http protocol is `http.`.
 
+Current protocol specifications:
+
+* HTTP (TODO)
+* WebSocket (TODO)
+* Lifespan (TODO)
+
+
 ### Events
 
 Each event is described by a hash with a `type` key that contains a Unicode string
