@@ -2,6 +2,31 @@ Here's a first draft of the documentation explaining how the ASGI protocol is ma
 
 ---
 
+# APSGI - Asynchronous Perl Web Server Gateway Interface specification
+
+## Abstract
+
+This document specifies a standard asynchronous interface between web servers and
+Perl web applications or frameworks. This interface is designed to promote web
+application portability and reduce duplication of effort by web application
+framework developers.
+
+## Architecture overview
+
+The specification defines two components:
+
+1. the (APSGI) server
+2. the application
+
+The server and application exchange messages defined in (separate) protocol
+specifications.
+
+The specification explicitly considers the concept "middleware": an application
+wrapper. By doing so it assumes the role of a server in relation
+to the wrapped application. At the same time, it presents itself as an
+application to its own server.
+
+
 ### **Mapping ASGI to Perl: **
 
 This document describes how the Python ASGI protocol is mapped to Perl
