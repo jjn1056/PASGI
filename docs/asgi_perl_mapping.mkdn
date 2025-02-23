@@ -55,6 +55,20 @@ life cycle, not with any network socket specifically.
 
 ### Data types
 
+The following are the allowed data types to be used in scopes and events:
+
+* Unicode string - Perl character string; MAY contain wide characters
+* Byte string - also known as Bytes - Perl string where each character is interpreted
+  as a byte; MUST NOT contain wide characters
+* Integers - integer numbers in the signed 64-bit number range
+* Floating point numbers - if supported by the Perl platform: IEEE 754 double
+  precision range, no `NaN`, `+Inf` or `-Inf`
+* Arrays - array references with elements in this list of data types
+* Hashes - hash references with keys being unicode strings and values in this list
+  of data types
+* Booleans - ... (how?)
+* `undef`
+
 ### Applications
 
 The APSGI application entry point is defined as:
