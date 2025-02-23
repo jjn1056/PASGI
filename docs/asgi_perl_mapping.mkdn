@@ -168,6 +168,7 @@ The ASGI application callable is mapped to a **Perl subroutine** that takes:
 - A **callback for sending responses (`$send_cb`)**.
 
 #### **Perl ASGI App Signature**
+
 ```perl
 sub app {
     my ($scope, $receive_cb, $send_cb) = @_;
@@ -191,6 +192,11 @@ sub app {
     });
 }
 ```
+
+@jjn1056, the above function actually does not work with `http.request` events with
+a `more_body` value of `True`: that will need at least one more iteration to retrieve
+the rest of the body.
+
 - This function **returns a Future** that resolves once the response is fully sent.
 - It relies on `then()` chaining to mimic `await` behavior.
 
