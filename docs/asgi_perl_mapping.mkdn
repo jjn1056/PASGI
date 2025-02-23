@@ -40,9 +40,10 @@ application to its own server.
 
 ### Call sequence
 
-The server initiates a bidirectional message stream by calling the asynchronous
-application entry point with a `scope` and two callbacks: `receive` and `send`.
-These will be used by the application to receive events and initiate replies.
+The server initiates a bidirectional stream of event messages by calling the
+asynchronous application entry point with a `scope` and two callbacks: `receive`
+and `send`. These will be used by the application to receive events and initiate
+replies.
 
 The server awaits the application call while the application processes the events
 it retrieves through repeated `receive` calls, only to return after `send`-ing and
