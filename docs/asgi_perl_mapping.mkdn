@@ -4,6 +4,10 @@ Here's a first draft of the documentation explaining how the ASGI protocol is ma
 
 # APSGI - Asynchronous Perl Web Server Gateway Interface specification
 
+## Version
+
+0.01 - DRAFT
+
 ## Abstract
 
 This document specifies a standard asynchronous interface between web servers and
@@ -19,17 +23,30 @@ The specification defines two components:
 2. the application
 
 The server and application exchange messages defined in (separate) protocol
-specifications.
+specifications. Protocol definitions include: HTTP, WebSockets and Lifespan.
 
 The specification explicitly considers the concept "middleware": an application
 wrapper. By doing so it assumes the role of a server in relation
 to the wrapped application. At the same time, it presents itself as an
 application to its own server.
 
+### Call sequence
 
-### **Mapping ASGI to Perl: **
+The server initiates a bidirectional message stream by calling the asynchronous
+application entry point with a `scope` and two callbacks: `receive` and `send`.
+These will be used by the application to receive events and initiate replies.
 
-This document describes how the Python ASGI protocol is mapped to Perl
+The server awaits the application call while the application processes the events
+it retrieves through repeated `receive` calls, only to return after `send`-ing and
+awaiting its final response.
+
+Whether or not this event stream is associated with a network socket depends on
+the protocol; for example, the Lifespan protocol is associated with the APSGI Server
+life cycle, not with any network socket specifically.
+
+## Data types
+
+
 
 ---
 
