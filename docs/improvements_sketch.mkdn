@@ -1,0 +1,242 @@
+---
+
+## 1. Standardized Middleware Pipeline
+
+**Idea:** Define a uniform middleware protocol so that middleware components can be chained together consistently.
+
+**Perl Code Example:**
+
+```perl
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+# Our ASGI-style app is a coderef that receives ($scope, $receive, $send)
+sub app {
+    my ($scope, $receive, $send) = @_;
+    # Simulate sending an HTTP response
+    $send->({
+        type    => 'http.response.start',
+        status  => 200,
+        headers => [ ['content-type', 'text/plain'] ],
+    });
+    $send->({
+        type => 'http.response.body',
+        body => "Hello, ASGI!",
+    });
+}
+
+# Base middleware that simply wraps the app call.
+sub base_middleware {
+    my ($app) = @_;
+    return sub {
+        my ($scope, $receive, $send) = @_;
+        print "BaseMiddleware: Before app call\n";
+        $app->($scope, $receive, $send);
+        print "BaseMiddleware: After app call\n";
+    };
+}
+
+# Logging middleware that logs the request path.
+sub logging_middleware {
+    my ($app) = @_;
+    return sub {
+        my ($scope, $receive, $send) = @_;
+        print "LoggingMiddleware: Request start: " . ($scope->{path} // '') . "\n";
+        $app->($scope, $receive, $send);
+        print "LoggingMiddleware: Request end\n";
+    };
+}
+
+# Wrap the app with logging middleware.
+my $application = logging_middleware(\&app);
+
+# Simulated dummy receiver and sender.
+my $dummy_receive = sub { return {} };
+my $dummy_send = sub {
+    my ($message) = @_;
+    print "Sending message: $message->{type}\n";
+};
+
+# Example scope for a request.
+my $scope = { path => '/example' };
+
+# Execute the application.
+$application->($scope, $dummy_receive, $dummy_send);
+```
+
+---
+
+## 2. Enhanced Protocol Support
+
+**Idea:** Extend the ASGI spec to support additional protocols beyond HTTP and WebSocket (e.g., MQTT).
+
+**Perl Code Example:**
+
+```perl
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+sub mqtt_app {
+    my ($scope, $receive, $send) = @_;
+    die "Unsupported protocol" if $scope->{type} ne 'mqtt';
+    my $message = $receive->();
+    print "MQTT Message Received: $message\n";
+    $send->({
+        type    => 'mqtt.response',
+        payload => "MQTT Ack",
+    });
+}
+
+# Simulated MQTT scope.
+my $scope_mqtt = { type => 'mqtt', topic => 'example' };
+
+my $dummy_receive = sub { return "Test MQTT message" };
+my $dummy_send = sub {
+    my ($message) = @_;
+    print "MQTT sending: $message->{type}\n";
+};
+
+# Execute the MQTT app.
+mqtt_app($scope_mqtt, $dummy_receive, $dummy_send);
+```
+
+Below is a revised sketch—under the "Enhanced Protocol Support" option—demonstrating how you might support Server-Sent Events (SSE) using Perl.
+
+```perl
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+# SSE app: a coderef that receives ($scope, $receive, $send)
+sub sse_app {
+    my ($scope, $receive, $send) = @_;
+
+    # Ensure the scope is for an HTTP request.
+    if ($scope->{type} eq 'http') {
+        # Send initial response headers for SSE:
+        $send->({
+            type    => 'http.response.start',
+            status  => 200,
+            headers => [
+                ['content-type', 'text/event-stream'],
+                ['cache-control',  'no-cache'],
+                ['connection',     'keep-alive'],
+            ],
+        });
+
+        # In a real SSE implementation, you would likely have a loop that waits
+        # for events. Here, we simulate sending 5 events with a delay.
+        for my $i (1 .. 5) {
+            # Build the SSE-formatted event string.
+            my $event = "data: Event $i at " . localtime() . "\n\n";
+            $send->({
+                type      => 'http.response.body',
+                body      => $event,
+                more_body => 1,  # Indicates more data will follow.
+            });
+            sleep 1;  # Simulate a delay between events.
+        }
+
+        # End the SSE stream by indicating no more data.
+        $send->({
+            type      => 'http.response.body',
+            body      => "",
+            more_body => 0,
+        });
+    }
+    else {
+        die "Unsupported protocol for SSE";
+    }
+}
+
+```
+
+## 3. Built-in Distributed Tracing and Metrics Support
+
+**Idea:** Integrate standardized tracing and metrics (using Metrics::Any) to improve observability.
+
+**Perl Code Example:**
+
+```perl
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Metrics::Any;
+
+# Create a counter metric for handling requests.
+my $counter = Metrics::Any->new_counter('handle_request', { description => 'Handle request counter' });
+
+sub traced_app {
+    my ($scope, $receive, $send) = @_;
+    $counter->inc();
+    $send->({
+        type    => 'http.response.start',
+        status  => 200,
+        headers => [ ['content-type', 'text/plain'] ],
+    });
+    $send->({
+        type => 'http.response.body',
+        body => "Hello, traced ASGI app!",
+    });
+}
+
+my $dummy_receive = sub { return {} };
+my $dummy_send = sub {
+    my ($message) = @_;
+    print "Tracing message: $message->{type}\n";
+};
+
+my $scope = { path => '/metrics' };
+
+traced_app($scope, $dummy_receive, $dummy_send);
+```
+---
+
+## 4. Asynchronous Background Task Integration
+
+**Idea:** Provide a standardized way to run asynchronous background tasks integrated within the ASGI lifecycle.  
+*Note:* For demonstration, we use Perl threads to simulate asynchronous tasks.
+
+**Perl Code Example:**
+
+```perl
+#!/usr/bin/perl
+use strict;
+use warnings;
+use threads;
+
+sub background_task {
+    my ($data) = @_;
+    sleep 1;
+    print "Background task completed with: $data\n";
+}
+
+sub app_with_background_task {
+    my ($scope, $receive, $send) = @_;
+    # Launch a background task (e.g., sending an email)
+    threads->create(\&background_task, "send email")->detach();
+    $send->({
+        type    => 'http.response.start',
+        status  => 200,
+        headers => [ ['content-type', 'text/plain'] ],
+    });
+    $send->({
+        type => 'http.response.body',
+        body => "Background task initiated!",
+    });
+}
+
+my $dummy_receive = sub { return {} };
+my $dummy_send = sub {
+    my ($message) = @_;
+    print "Background task message: $message->{type}\n";
+};
+
+my $scope = { path => '/background' };
+
+app_with_background_task($scope, $dummy_receive, $dummy_send);
+```
+
+---
