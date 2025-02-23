@@ -15,7 +15,15 @@ Perl web applications or frameworks. This interface is designed to promote web
 application portability and reduce duplication of effort by web application
 framework developers.
 
-## Architecture overview
+## Introduction
+
+Perl does not natively support Python’s `async/await` pattern, but we can achieve similar
+functionality using **Futures** (from `Future.pm`) and **IO::Async** (from `IO::Async::Loop`).
+Below is how we translate key ASGI components into Perl.
+
+## Specification
+
+### Architecture overview
 
 The specification defines two components:
 
@@ -44,9 +52,42 @@ Whether or not this event stream is associated with a network socket depends on
 the protocol; for example, the Lifespan protocol is associated with the APSGI Server
 life cycle, not with any network socket specifically.
 
-## Data types
+### Data types
+
+### Applications
+
+The APSGI application entry point is defined as:
+
+```perl
+async sub app( $scope, $receive\_cb, $send\_cb ) { ... }
+```
+
+where `$scope` MUST be a hash reference. `$receive_cb` and `$send_cb` MUST be
+code references to asynchronous functions (`async sub` or `sub` returning a Future).
+
+The content of `$scope` is defined in the next section.
+
+### Scopes
+
+Scopes MUST be a hash reference. The following keys MUST be present:
+
+* `type` (character string) - its value indicates the protocol the server
+  expects to establish.
+* `apsgi` (hash reference), with the following keys:
+  * `version` (character string) - MUST be present; indicates the APSGI version the
+    server implements
+  * `spec_version` (character string) - MUST be present; indicates the version of
+    the protocol specification indicated by the scope key `type` which the server
+    implements
+
+Protocols define additional keys to be passed in `$scope`.
+
+Scopes MUST NOT be modified by applications. Middleware wanting to pass additional
+values in scopes must copy the scope and pass the copied scope to its wrapped
+application.
 
 
+### Events
 
 ---
 
@@ -67,8 +108,6 @@ async def app(scope, receive, send):
 ---
 
 ## **2. Mapping ASGI to Perl**
-
-Perl does not natively support Python’s `async/await` pattern, but we can achieve similar functionality using **Futures** (from `Future.pm`) and **IO::Async** (from `IO::Async::Loop`).  Below is how we translate key ASGI components into Perl.
 
 ### **2.1. Application Interface**
 The ASGI application callable is mapped to a **Perl subroutine** that takes:
