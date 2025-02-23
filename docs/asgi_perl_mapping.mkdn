@@ -27,6 +27,10 @@ does not natively support the `async/await` pattern like Python or JavaScript,
 the module `Future::AsyncAwait` implements the pattern since 24 January 2018
 for Perl versions 5.16 and up.
 
+Considering the above and the fact that similar specifications have existed for
+several years now for other languages, the time has arrived to create a fully
+asynchronous webserver gateway interface specification for Perl.
+
 ---
 
 Perl does not natively support Python’s `async/await` pattern, but we can achieve similar
