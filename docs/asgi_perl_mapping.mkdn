@@ -101,8 +101,30 @@ Scopes MUST NOT be modified by applications. Middleware wanting to pass addition
 values in scopes must copy the scope and pass the copied scope to its wrapped
 application.
 
+### Protocols
+
+Protocols define additional keys in the application `$scope` as well as the
+messages - describing protocol events - being transferred between application
+and server.
+
+The `type` key in `$scope` indicates the name of the protocol. To prevent
+colision of protocol names, the `APSGI::Protocol::` namespace has been designated
+as the protocol namespace registry. Protocols definitions MUST be published as a
+module by their name as used in the `type` key. That is, the `http` protocol
+specification will be published as the (documentation-only)
+module `APSGI::Protocol::http`.
+
+Names of events defined in protocols MUST be prefixed by the name of the protocol
+followed by a dot. That is, the name prefix for the http protocol is `http.`.
 
 ### Events
+
+Each event is described by a hash with a `type` key that contains a Unicode string
+naming the message. For example in case of the http protocol, the message name
+is either `http.request` or `http.disconnect`. Applications and middleware MAY
+invent their own high-level messages and send them between application instances.
+Such events MUST prefix the message name with `x-` to prevent namespace collision
+with events registered through published protocols.
 
 ---
 
