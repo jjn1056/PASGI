@@ -214,3 +214,21 @@ $loop->run;
 
 ---
 
+## Terminology
+
+## Changelog
+
+## Acknowledgements
+
+Parts of this specification are adopted from the following specifications.
+
+* [ASGI](https://asgi.readthedocs.io/en/latest/introduction.html)
+* [PSGI](https://metacpan.org/dist/PSGI/view/PSGI.pod)
+
+## Authors
+
+* John Napiorkowski
+* Erik Huelsmann
+
+## Contributors
+
