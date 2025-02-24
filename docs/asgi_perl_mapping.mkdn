@@ -196,17 +196,17 @@ sub app {
         my $event = shift;
         
         # Send response headers
-        return $send_cb->({
+        return $send_cb->(
             type    => "http.response.start",
             status  => 200,
             headers => [['content-type', 'text/plain']]
-        });
+        );
     })->then(sub {
         # Send response body
-        return $send_cb->({
+        return $send_cb->(
             type => "http.response.body",
             body => "Hello, world!"
-        });
+        );
     });
 }
 ```
@@ -228,16 +228,16 @@ async sub app {
 
     my $event = await $receive_cb->();
 
-    await $send_cb->({
+    await $send_cb->(
         type    => "http.response.start",
         status  => 200,
         headers => [['content-type', 'text/plain']]
-    });
+    );
 
-    await $send_cb->({
+    await $send_cb->(
         type => "http.response.body",
         body => "Hello, world!"
-    });
+    );
 }
 ```
 ---
@@ -275,15 +275,15 @@ Responses follow the ASGI structure:
 
 Perl equivalent:
 ```perl
-$send_cb->({
+$send_cb->(
     type    => "http.response.start",
     status  => 200,
     headers => [['content-type', 'text/plain']]
-})->then(sub {
-    return $send_cb->({
+)->then(sub {
+    return $send_cb->(
         type => "http.response.body",
         body => "Hello, world!"
-    });
+    );
 });
 ```
 This follows the **IO::Async::Future** pattern for non-blocking execution.
@@ -337,16 +337,16 @@ sub websocket_app {
     my ($scope, $receive_cb, $send_cb) = @_;
     
     # Accept WebSocket connection
-    $send_cb->({ type => "websocket.accept" })->then(sub {
+    $send_cb->( type => "websocket.accept" )->then(sub {
         return $receive_cb->();
     })->then(sub {
         my $event = shift;
         
         # Echo the received message back
-        return $send_cb->({
+        return $send_cb->(
             type => "websocket.send",
             text => $event->{text}
-        });
+        );
     });
 }
 ```
