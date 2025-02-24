@@ -15,15 +15,15 @@ use warnings;
 sub app {
     my ($scope, $receive, $send) = @_;
     # Simulate sending an HTTP response
-    $send->({
+    $send->(
         type    => 'http.response.start',
         status  => 200,
         headers => [ ['content-type', 'text/plain'] ],
-    });
-    $send->({
+    );
+    $send->(
         type => 'http.response.body',
         body => "Hello, ASGI!",
-    });
+    );
 }
 
 # Base middleware that simply wraps the app call.
@@ -83,10 +83,10 @@ sub mqtt_app {
     die "Unsupported protocol" if $scope->{type} ne 'mqtt';
     my $message = $receive->();
     print "MQTT Message Received: $message\n";
-    $send->({
+    $send->(
         type    => 'mqtt.response',
         payload => "MQTT Ack",
-    });
+    );
 }
 
 # Simulated MQTT scope.
@@ -116,7 +116,7 @@ sub sse_app {
     # Ensure the scope is for an HTTP request.
     if ($scope->{type} eq 'http') {
         # Send initial response headers for SSE:
-        $send->({
+        $send->(
             type    => 'http.response.start',
             status  => 200,
             headers => [
@@ -124,27 +124,27 @@ sub sse_app {
                 ['cache-control',  'no-cache'],
                 ['connection',     'keep-alive'],
             ],
-        });
+        );
 
         # In a real SSE implementation, you would likely have a loop that waits
         # for events. Here, we simulate sending 5 events with a delay.
         for my $i (1 .. 5) {
             # Build the SSE-formatted event string.
             my $event = "data: Event $i at " . localtime() . "\n\n";
-            $send->({
+            $send->(
                 type      => 'http.response.body',
                 body      => $event,
                 more_body => 1,  # Indicates more data will follow.
-            });
+            );
             sleep 1;  # Simulate a delay between events.
         }
 
         # End the SSE stream by indicating no more data.
-        $send->({
+        $send->(
             type      => 'http.response.body',
             body      => "",
             more_body => 0,
-        });
+        );
     }
     else {
         die "Unsupported protocol for SSE";
@@ -171,15 +171,15 @@ my $counter = Metrics::Any->new_counter('handle_request', { description => 'Hand
 sub traced_app {
     my ($scope, $receive, $send) = @_;
     $counter->inc();
-    $send->({
+    $send->(
         type    => 'http.response.start',
         status  => 200,
         headers => [ ['content-type', 'text/plain'] ],
-    });
-    $send->({
+    );
+    $send->(
         type => 'http.response.body',
         body => "Hello, traced ASGI app!",
-    });
+    );
 }
 
 my $dummy_receive = sub { return {} };
@@ -217,15 +217,15 @@ sub app_with_background_task {
     my ($scope, $receive, $send) = @_;
     # Launch a background task (e.g., sending an email)
     threads->create(\&background_task, "send email")->detach();
-    $send->({
+    $send->(
         type    => 'http.response.start',
         status  => 200,
         headers => [ ['content-type', 'text/plain'] ],
-    });
-    $send->({
+    );
+    $send->(
         type => 'http.response.body',
         body => "Background task initiated!",
-    });
+    );
 }
 
 my $dummy_receive = sub { return {} };

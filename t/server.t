@@ -11,15 +11,15 @@ if ($pid == 0) {
     my $server = PASGI::Server->new(
         app => sub {
             my ($scope, $receive, $send) = @_;
-            return $send->({
+            return $send->(
                 type    => 'http.response.start',
                 status  => 200,
                 headers => [ ['content-type', 'text/plain'] ],
-            })->then(sub {
-                return $send->({
+            )->then(sub {
+                return $send->(
                     type => 'http.response.body',
                     body => "Hello, World!",
-                });
+                );
             });
         },
         host => '127.0.0.1',
