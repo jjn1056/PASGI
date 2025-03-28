@@ -188,8 +188,8 @@ Applications **must** throw an exception if the protocol is unknown.
 
 Current protocol specifications:
 
-- [HTTP, WebSocket and SSE](specs/www.mkdn)
-- [Lifespan](specs/lifespan.mkdn)
+- [HTTP, WebSocket and SSE](www.mkdn)
+- [Lifespan](lifespan.mkdn)
 
 ### Middleware
 
