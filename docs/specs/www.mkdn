@@ -1,0 +1,209 @@
+# HTTP, WebSocket & SSE PASGI Message Format
+
+**Version**: 0.1 (Draft)
+
+The HTTP, WebSocket & SSE PASGI sub-specification defines how HTTP/1.1, HTTP/2, WebSocket, and Server-Side Events (SSE) connections are transported within PASGI.
+
+It is designed to be a superset of the PSGI specification and specifies how to translate between PASGI and PSGI for compatible requests.
+
+## Spec Versions
+
+- `0.1`: Initial draft, based on ASGI 2.5, including Server-Side Events support.
+
+## HTTP
+
+PASGI covers HTTP/1.0, HTTP/1.1, and HTTP/2. Protocol servers assign separate scopes for requests within the same HTTP/2 connection and multiplex responses appropriately.
+
+The HTTP version is available in the scope. Pseudo headers (like `:authority`) from HTTP/2 and HTTP/3 must be removed; if `:authority` is present, its value must be used to populate or override the `host` header.
+
+Multiple `Set-Cookie` headers must be preserved individually, and `Cookie` headers should be combined or split according to the version-specific rules (as per RFC 7230, RFC 6265, and RFC 9113).
+
+### HTTP Connection Scope
+
+Each HTTP request has a single-request connection scope. Scope keys:
+
+- `type` (String) -- `"http"`
+- `pasgi["version"]` (String) -- PASGI version
+- `pasgi["spec_version"]` (String) -- PASGI HTTP spec version (default `"0.1"`)
+- `http_version` (String) -- `"1.0"`, `"1.1"`, or `"2"`
+- `method` (String) -- Uppercase HTTP method
+- `scheme` (String, default `"http"`) -- URL scheme (`"http"` or `"https"`)
+- `path` (String) -- Decoded HTTP path
+- `raw_path` (Bytes, optional) -- Original HTTP path bytes
+- `query_string` (Bytes) -- Percent-encoded query string
+- `root_path` (String, default `""`) -- Application mount path, equivalent to `SCRIPT_NAME` in PSGI
+- `headers` (ArrayRef[ArrayRef[Bytes]]) -- Original HTTP headers
+- `client` (ArrayRef[String, Int], optional) -- `[host, port]` of client
+- `server` (ArrayRef[String, Optional[Int]], optional) -- `[host, port]` or `[path, undef]` for Unix sockets
+- `state` (HashRef, optional) -- State namespace from lifespan
+
+### Request - `receive` event
+
+Note: Chunked transfer encoding must be de-chunked by the server. Each `http.request` represents a de-chunked body fragment.
+
+Keys:
+
+- `type` -- `"http.request"`
+- `body` (Bytes, default `""`) -- Request body chunk
+- `more_body` (Int, default `0`) -- `1` if more body data is forthcoming, otherwise `0`
+
+### Response Start - `send` event
+
+Note: Protocol servers are not required to flush on `http.response.start`, giving flexibility to emit an error response in case of internal application errors before data is sent.
+
+Transfer-Encoding headers sent by the application must be ignored. Content-Encoding (e.g. gzip) is under application control.
+
+Keys:
+
+- `type` -- `"http.response.start"`
+- `status` (Int) -- HTTP status code
+- `headers` (ArrayRef[ArrayRef[Bytes]], default `[]`) -- Response headers
+- `trailers` (Int, default `0`) -- `1` if trailers will be sent after body, otherwise `0`
+
+### Response Body - `send` event
+
+Keys:
+
+- `type` -- `"http.response.body"`
+- `body` (Bytes, default `""`) -- Response body chunk
+- `more_body` (Int, default `0`) -- Indicates more body content to follow (`1` if true, otherwise `0`)
+
+### Disconnected Client - `send` exception
+
+Servers may raise an exception  if the connection is closed.  Applications should catch such exceptions and clean up.
+
+### Disconnect - `receive` event
+
+Sent to the application if receive is called after a response has been sent or after the HTTP connection has been closed.
+
+Keys:
+
+- `type` -- `"http.disconnect"`
+
+## WebSocket
+
+WebSocket servers handle fragmentation and PING/PONG messages. Servers must wait for a reply to `websocket.connect` before completing the handshake. If `websocket.close` is sent instead of `websocket.accept`, the server must reject the connection with HTTP 403.
+
+### WebSocket Connection Scope
+
+- `type` (String) -- `"websocket"`
+- `pasgi["version"]` (String) -- PASGI version
+- `pasgi["spec_version"]` (String) -- PASGI HTTP spec version (default `"0.1"`)
+- `http_version` (String, default `"1.1"`) -- HTTP version used for handshake
+- `scheme` (String, default `"ws"`) -- URL scheme (`"ws"` or `"wss"`)
+- `path` (String) -- Decoded path string
+- `raw_path` (Bytes, optional) -- Original path bytes from request
+- `query_string` (Bytes) -- Percent-encoded query string
+- `root_path` (String, default `""`) -- Mount point for application
+- `headers` (ArrayRef[ArrayRef[Bytes]]) -- Original headers
+- `client` (ArrayRef[String, Int], optional)
+- `server` (ArrayRef[String, Optional[Int]], optional)
+- `subprotocols` (ArrayRef[String], default `[]`)
+- `state` (HashRef, optional)
+
+### WebSocket Events
+
+#### Connect - `receive` event
+
+- `type` -- `"websocket.connect"`
+
+#### Accept - `send` event
+
+- `type` -- `"websocket.accept"`
+- `subprotocol` (String, optional)
+- `headers` (ArrayRef[ArrayRef[Bytes]], optional)
+
+#### Receive - `receive` event
+
+- `type` -- `"websocket.receive"`
+- `bytes` (Bytes, optional)
+- `text` (String, optional)
+
+Exactly one must be non-null.
+
+#### Send - `send` event
+
+- `type` -- `"websocket.send"`
+- `bytes` (Bytes, optional)
+- `text` (String, optional)
+
+Exactly one must be non-null.
+
+#### Disconnect - `receive` event
+
+- `type` -- `"websocket.disconnect"`
+- `code` (Int, default `1005`)
+- `reason` (String, default empty)
+
+#### Disconnected Client - `send` exception
+
+Raises server-specific subclass of `OSError`.
+
+#### Close - `send` event
+
+- `type` -- `"websocket.close"`
+- `code` (Int, default `1000`)
+- `reason` (String, default empty)
+
+## Server-Side Events (SSE)
+
+SSE connections stream `text/event-stream` data to clients.
+
+### SSE Connection Scope
+
+Same as HTTP scope with:
+
+- `type` -- `"sse"`
+
+### Start SSE - `send` event:
+
+- `type` -- `"sse.start"`
+- `status` (Int, default `200`)
+- `headers` (ArrayRef[ArrayRef[Bytes]])
+
+### Send SSE - `send` event:
+
+- `type` -- `"sse.send"`
+- `event` (String, optional)
+- `data` (String)
+- `id` (String, optional)
+- `retry` (Int, optional)
+
+## PASGI to PSGI Compatibility
+
+PASGI translates keys explicitly to maintain compatibility with PSGI:
+
+- `REQUEST_METHOD` → `method`
+- `SCRIPT_NAME` → `root_path`
+- `PATH_INFO` → `path` minus `root_path`
+- `QUERY_STRING` → `query_string`
+- `CONTENT_TYPE` → extracted from `headers`
+- `CONTENT_LENGTH` → extracted from `headers`
+- `SERVER_NAME`, `SERVER_PORT` → `server`
+- `REMOTE_ADDR`, `REMOTE_PORT` → `client`
+- `SERVER_PROTOCOL` → `http_version`
+- `psgi.url_scheme` → `scheme`
+- `psgi.input` → constructed from `http.request` events
+- `psgi.errors` → handled by server as appropriate
+
+Response mappings:
+
+- `status` and `headers` map directly to `http.response.start`
+- Body content from PSGI maps directly to `http.response.body` messages.
+
+## PASGI Encoding Differences
+
+- `path`: Decoded UTF-8 string from percent-encoded input
+- `headers`: Represented as bytes exactly as sent/received
+- `query_string`: Raw bytes from URL after `?`, percent-encoded
+- `root_path`: Unicode path string matching `SCRIPT_NAME`
+
+## Version History
+
+- `0.1` (Draft): Initial draft based on ASGI 2.5, supporting HTTP, WebSocket, and SSE.
+
+## Copyright
+
+This document has been placed in the public domain.
+
+

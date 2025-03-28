@@ -1,0 +1,10 @@
+# PASGI Specifications
+
+These are the specifications for PASGI. The root specification outlines how applications are structured and invoked, while the protocol specifications describe the events that can be sent and received for each supported protocol.
+
+## Table of Contents
+
+- [PASGI Specification](main.mkdn)
+- [HTTP and WebSocket Protocol](www.mkdn)
+- [Lifespan](lifespan.mkdn)
+- [TLS Extension](tls.mkdn)
