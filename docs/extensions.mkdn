@@ -1,0 +1,5 @@
+# Extensions
+
+The PASGI specification provides for server-specific extensions to be used outside of the core PASGI specification. This document specifies some common extensions.
+
+TBD

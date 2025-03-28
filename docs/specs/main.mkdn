@@ -1,0 +1,268 @@
+# PASGI (Perl Asynchronous Server Gateway Interface) Specification
+
+*Note: All code examples use modern Perl with subroutine signatures and ****\`\`**** for clarity. This is a documentation preference and ****not**** a requirement of the PASGI specification.*
+
+**Version**: 0.1 (Draft)
+
+## Introduction
+
+While work has been done to support asynchronous response handling in PSGI (the `psgi.nonblocking` environment key), support for protocols with multiple input events (such as WebSockets) remained hacks. The use of non-blocking or asynchronous handling based on PSGI never took off. The PSGI specification hasn't changed since July 2013. Since then, asynchronous programming in has taken off in many programming languages, including in Perl: although Perl does not natively support the `async/await` pattern like Python or JavaScript, the module `Future::AsyncAwait` implements the pattern since 24 January 2018 for Perl versions 5.16 and up.
+
+Considering the above and the fact that similar specifications have existed for several years now for other languages, the time has arrived to create a fully asynchronous webserver gateway interface specification for Perl.
+
+---
+
+Perl does not natively support Python’s `async/await` pattern, but we can achieve similar functionality using **Futures** (from `Future.pm`) and **IO::Async** (from `IO::Async::Loop`). Below is how we translate key ASGI components into Perl.
+
+---
+
+## Abstract
+
+This document proposes a standard interface between network protocol servers (particularly web servers) and Perl applications, intended to support multiple common protocol styles (including HTTP/1.1, HTTP/2, and WebSocket).
+
+This base specification defines the APIs by which servers interact with and run application code. Each supported protocol (such as HTTP) includes a sub-specification detailing how to encode and decode that protocol into structured messages.
+
+## Rationale
+
+PSGI has worked well as a standard interface for synchronous Perl web applications. However, its design is tied to the HTTP-style request/response cycle, and cannot support full-duplex protocols such as WebSockets.
+
+PASGI preserves a simple application interface while introducing a fully asynchronous message-based abstraction, enabling data to be sent and received at any time during a connection's lifecycle.
+
+It defines:
+
+- A standardized interface for communication between server and application.
+- A set of message formats per protocol.
+
+The primary goal is to support WebSockets, HTTP/2, and Server-Sent Events (SSE) alongside HTTP/1.1, while maintaining compatibility with existing PSGI applications through a transitional adapter layer.
+
+## Overview
+
+PASGI consists of two main components:
+
+- A *protocol server* which manages sockets and translates network events into connection-level messages.
+
+- An *application* which is invoked once per connection and communicates via asynchronous message passing.
+
+Applications are written as asynchronous subroutines using `Future` and `IO::Async`. They receive a `scope` describing the connection, and two coderefs, `$recv` and `$send`, which return Futures representing event input and output.
+
+Unlike PSGI, PASGI applications persist for the entire connection lifecycle. They process incoming events from the server and emit outgoing events in response.
+
+Two important concepts in PASGI:
+
+- *Connection scope*: A hashref describing the connection.
+- *Events*: Hashrefs representing messages sent/received during the connection.
+
+## Specification Details
+
+### Connection Scope
+
+Each incoming connection causes the application to be invoked with a `scope` hashref. Its keys include:
+
+- `type`: Protocol type, e.g., `http`, `websocket`
+- `pasgi`: A hashref with at least:
+  - `version => '0.1'`
+  - `spec_version => '1.0'` (optional; protocol-specific version)
+  - `features` (optional): a hashref of server-reported capabilities:
+    - `streaming` => 1 if streaming responses are supported
+    - `tls` => 1 if the connection is over TLS
+    - `http2` => 1 if HTTP/2 is in use
+    - `max_request_body_size` => maximum accepted request body size (in bytes)
+    - ... (server-defined)
+- Additional keys defined per protocol
+
+The scope describes the full lifetime of the connection, and persists until the connection is closed. Some protocols (e.g., HTTP) may treat each request as a distinct scope, while others (e.g., WebSocket) maintain one persistent scope for the entire session.
+
+Applications may need to wait for an initial event before sending any messages, depending on the protocol specification.
+
+### Events
+
+PASGI defines communication in terms of discrete events.
+
+The `type` key in each event must be a namespaced string of the form `protocol.message_type`, such as `http.request` or `websocket.send`. This convention ensures clear protocol dispatching and avoids naming collisions.
+
+Reserved `type` prefixes include:
+
+- `http` — standard HTTP events
+- `websocket` — WebSocket events
+- `lifespan` — process lifecycle events
+- `pasgi` — reserved for future PASGI-defined system events
+- `ext.` — reserved for experimental or nonstandard events
+
+Custom user-defined protocols should avoid clashing with these prefixes.
+
+The `type` key in each event must be a namespaced string of the form `protocol.message_type`, such as `http.request` or `websocket.send`. This convention ensures clear protocol dispatching and avoids naming collisions. Each event is a hashref with a mandatory `type` key and additional fields depending on the event.
+
+Applications use:
+
+```perl
+my $event = await $recv->();
+await $send->({ type => 'http.response.start', ... });
+```
+
+Permitted event data types:
+
+- UTF-8 encoded text strings (Perl scalars with the UTF-8 flag set)
+- Binary strings (Perl scalars without the UTF-8 flag set, e.g., for HTTP body payloads)
+- Integers: must be within the signed 64-bit range. Perl supports arbitrary-size integers, but PASGI restricts this to ensure compatibility with common serialization formats and cross-language interoperability.
+- Floating point numbers: must be IEEE 754 double precision values. Special values like `NaN` or `Inf` must not be used, as they are inconsistently supported across platforms and serializers.
+- `undef`
+- Arrayrefs (must contain only permitted types)
+- Hashrefs (keys must be byte strings that are valid UTF-8 when decoded; values must be permitted types)
+
+**Note:** Booleans are intentionally omitted from the core spec to avoid ambiguity in Perl, which lacks a native boolean type. In contexts where ASGI would use `true`/`false`, PASGI protocol specifications will define expected values explicitly — usually `0` or `1`, or by the presence/absence of a defined value.
+
+### Applications
+
+PASGI applications are single coderefs returning Futures.
+
+Applications may optionally support lifecycle hooks such as shutdown. If supported, the PASGI server should call:
+
+```perl
+$app->on_shutdown(sub {
+    # Optional shutdown logic (e.g., flush logs, close DB)
+});
+```
+
+This pattern is reserved and may be formalized in a future PASGI extension.
+
+Applications **must** throw an exception if the incoming `scope->{type}` is not supported. This prevents the server from assuming a protocol is handled when it is not, and avoids ambiguity in multi-protocol deployments.
+
+Each application is expected to run for the duration of a connection and may remain alive briefly after disconnect to perform cleanup. The interface is:
+
+```perl
+use Future::AsyncAwait;
+
+async sub application ($scope, $recv, $send) {
+    if ($scope->{type} ne 'http') {
+        die "Unsupported protocol type: $scope->{type}";
+    }
+
+    await $send->({
+        type    => 'http.response.start',
+        status  => 200,
+        headers => [ [ 'content-type', 'text/plain' ] ],
+    });
+
+    await $send->({
+        type       => 'http.response.body',
+        body       => "Hello from PASGI!",
+        more_body => 0,
+    });
+
+    return;
+}
+```
+
+- `$scope`: Hashref with connection metadata
+- `$recv`: Coderef returning a `Future` resolving to the next event
+- `$send`: Coderef taking an event hashref and returning a `Future`
+
+Each application is called per-connection, and remains active until the connection closes and cleanup completes.
+
+### Legacy Applications
+
+Legacy (PSGI) applications are not async and follow a synchronous interface. Support for these can be implemented via a compatibility adapter.
+
+Adapters must call the PSGI app once with `$env` and transform the response into PASGI event messages.
+
+### Protocol Specifications
+
+Each protocol defines:
+
+- Scope format
+- Event types for `$recv` and `$send`
+
+Common examples:
+
+- `http.request`, `http.response.start`, `http.response.body`
+- `websocket.connect`, `websocket.receive`, `websocket.send`
+
+The `type` field in scope and events identifies the protocol and message:
+
+```perl
+$event->{type} eq 'http.request';
+$scope->{type} eq 'websocket';
+```
+
+Applications **must** throw an exception if the protocol is unknown.
+
+Current protocol specifications:
+
+- [HTTP, WebSocket and SSE](specs/www.mkdn)
+- [Lifespan](specs/lifespan.mkdn)
+
+### Middleware
+
+PASGI middleware wraps an application:
+
+```perl
+use Future::AsyncAwait;
+
+sub middleware ($app) {
+    return async sub ($scope, $recv, $send) {
+        my $modified_scope = { %$scope, custom => 1 };
+        return await $app->($modified_scope, $recv, $send);
+    };
+}
+
+```
+
+Middleware **must not** mutate the original `$scope` in-place; always clone before modification.
+
+### Cancellation and Disconnects
+
+If the server supports client-driven cancellation (e.g., HTTP/2 resets or WebSocket disconnects), it must send an event such as:
+
+```perl
+{ type => 'http.disconnect' }
+```
+
+Applications should handle this by halting processing and performing cleanup as needed.
+
+### Error Handling
+
+Servers must raise exceptions if:
+
+- Events are missing required fields
+- Event fields are of the wrong type
+- The `type` field is unrecognized
+
+Applications should do the same when receiving malformed events.
+
+Extra fields in events **must not** cause errors — this supports forward-compatible upgrades.
+
+If `$send` is called after connection closure, it should be a no-op unless specified otherwise.
+
+### Extensions
+
+Servers may expose additional features via the `extensions` key in the scope:
+
+```perl
+$scope->{extensions} = {
+    fullflush => {},
+};
+```
+
+Applications may send new events such as:
+
+```perl
+await $send->({ type => 'http.fullflush' });
+```
+
+Only if the server declares support in `extensions`.
+
+### Strings and Unicode
+
+All keys in scope and event hashrefs **must** be strings that are valid UTF-8 when interpreted as bytes. The UTF-8 flag is not required, but the keys must decode cleanly as UTF-8.
+
+Byte content (e.g., body payloads) must be passed as Perl scalars **without** the UTF-8 flag set. Applications are responsible for encoding/decoding appropriately.
+
+## Version History
+
+- 0.1 (Draft): Initial PASGI version, modeled after ASGI 3.0
+
+## Copyright
+
+This document is placed in the public domain.
+
+
