@@ -99,15 +99,27 @@ my $event = await $recv->();
 await $send->({ type => 'http.response.start', ... });
 ```
 
-Permitted event data types:
+#### Permitted Event Data Types
 
-- UTF-8 encoded text strings (Perl scalars with the UTF-8 flag set)
-- Binary strings (Perl scalars without the UTF-8 flag set, e.g., for HTTP body payloads)
-- Integers: must be within the signed 64-bit range. Perl supports arbitrary-size integers, but PASGI restricts this to ensure compatibility with common serialization formats and cross-language interoperability.
-- Floating point numbers: must be IEEE 754 double precision values. Special values like `NaN` or `Inf` must not be used, as they are inconsistently supported across platforms and serializers.
-- `undef`
-- Arrayrefs (must contain only permitted types)
-- Hashrefs (keys must be byte strings that are valid UTF-8 when decoded; values must be permitted types)
+The following types are permitted in event data structures:
+
+- **Strings** (Perl scalars):
+  - **Text strings**: Strings containing decoded Unicode characters. These must be explicitly encoded according to the relevant protocol before serialization or transmission.
+  - **Byte strings**: Strings containing opaque binary data. Their intended encoding or interpretation, if applicable, must be explicitly specified by the relevant protocol.
+
+  *Note*: Do **not** rely on Perl's internal UTF-8 flag (`utf8::is_utf8`) to distinguish between text and binary strings. The protocol or application context must explicitly indicate the intent.
+
+- **Integers**: Signed 64-bit integers. While Perl supports arbitrary-size integers, PASGI restricts integers to this range to ensure interoperability across serialization formats and programming languages.
+
+- **Floating-point numbers**: IEEE 754 double-precision floats. Special values (`NaN`, `Inf`, `-Inf`) are **not permitted**, due to inconsistent cross-platform and serialization support.
+
+- **`undef`**: Represents the absence of a value.
+
+- **Arrayrefs**: Arrays containing only permitted data types.
+
+- **Hashrefs**: Hashes with keys stored as **byte strings**.
+  - If keys represent textual data, they **must be explicitly encoded into UTF-8 byte strings** by the application.
+  - Values must contain only permitted data types.
 
 **Note:** Booleans are intentionally omitted from the core spec to avoid ambiguity in Perl, which lacks a native boolean type. In contexts where ASGI would use `true`/`false`, PASGI protocol specifications will define expected values explicitly — usually `0` or `1`, or by the presence/absence of a defined value.
 
