@@ -158,7 +158,7 @@ async sub application ($scope, $recv, $send) {
     await $send->({
         type       => 'http.response.body',
         body       => "Hello from PASGI!",
-        more_body => 0,
+        more       => 0,
     });
 
     return;

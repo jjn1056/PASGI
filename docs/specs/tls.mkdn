@@ -239,7 +239,7 @@ async sub app ($scope, $receive, $send) {
         await $send->({
             type      => 'http.response.body',
             body      => "Hello over TLS!",
-            more_body => 0,
+            more      => 0,
         });
     }
     else {

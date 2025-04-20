@@ -58,21 +58,21 @@ These *events* each have a defined `type` key, which can be used to infer
 the event's structure. Here's an example event that you might receive from
 `$receive->()` with the body from an HTTP request:
 
-```json
+```perl
 {
-    "type": "http.request",
-    "body": "Hello World",
-    "more_body": false
+    type => "http.request",
+    body => "Hello World",
+    more => 0
 }
 ```
 
 And here's an example of an event you might pass to `$send->()` to send an
 outgoing WebSocket message:
 
-```json
+```perl
 {
-    "type": "websocket.send",
-    "text": "Hello world!"
+    type => "websocket.send",
+    text => "Hello world!"
 }
 ```
 
