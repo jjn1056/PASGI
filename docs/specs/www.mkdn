@@ -13,10 +13,47 @@ It is designed to be a superset of the PSGI specification and specifies how to t
 ## HTTP
 
 PASGI covers HTTP/1.0, HTTP/1.1, and HTTP/2. Protocol servers assign separate scopes for requests within the same HTTP/2 connection and multiplex responses appropriately.
+### HTTP/2 Stream Mapping
+PASGI servers must translate HTTP/2 frames into PASGI HTTP events per stream. Applications only see structured events, not raw frames:
+
+- **HEADERS**: start a new PASGI `http` scope and emit an initial `http.request` event with headers and `more => 1` if DATA will follow, or `more => 0` if `END_STREAM` was signaled immediately.
+- **DATA**: emit subsequent `http.request` events with `body => <chunk>` and `more => 1` or `0` depending on `END_STREAM`.
+- **END_STREAM**: if no DATA frames, send an `http.request` with `body => ''` and `more => 0` to signal end of request.
+- **RST_STREAM**: trigger a `http.disconnect` event and cancel any outstanding Futures for that scope.
+- **WINDOW_UPDATE / PRIORITY**: ignored by default (advanced flow control is optional).
+- **PUSH_PROMISE**: not supported; servers must reject push promises.
+
+Only HTTP/2 over TLS (`h2`) is required for the initial implementation; cleartext HTTP/2 (`h2c`) is optional.
 
 The HTTP version is available in the scope. Pseudo headers (like `:authority`) from HTTP/2 and HTTP/3 must be removed; if `:authority` is present, its value must be used to populate or override the `host` header.
 
 Multiple `Set-Cookie` headers must be preserved individually, and `Cookie` headers should be combined or split according to the version-specific rules (as per RFC 7230, RFC 6265, and RFC 9113).
+
+### 🍪 Cookie Header Normalization
+
+PASGI servers **must normalize `Cookie` headers** before passing them to the application.
+
+- If multiple `Cookie:` headers are received from the client (which may happen in real-world deployments despite RFC guidance), the server must:
+  - Concatenate them using `"; "` (semicolon followed by space)
+  - Ensure only **one `cookie` header** appears in the PASGI `headers` list
+
+**Example:**
+
+If the client sends:
+
+```perl
+Cookie: a=1 Cookie: b=2; c=3
+```
+
+The PASGI scope must include:
+
+```perl
+headers => [
+  [ 'cookie', 'a=1; b=2; c=3' ]
+]
+```
+
+The server does not parse the cookie string into key-value pairs — parsing is left to middleware or application code. The server only guarantees RFC-compliant normalization.
 
 ### HTTP Connection Scope
 
@@ -70,7 +107,12 @@ Keys:
 
 ### Disconnected Client - `send` exception
 
-Servers may raise an exception  if the connection is closed.  Applications should catch such exceptions and clean up.
+If the client disconnects or cancels the connection, servers MUST send an explicit `disconnect` event to the application.
+
+Applications MUST gracefully handle this event by:
+- Immediately halting unnecessary processing upon disconnect
+- Optionally sending minimal final acknowledgment messages
+- Executing asynchronous cleanup of resources as necessary.
 
 ### Disconnect - `receive` event
 
@@ -100,6 +142,12 @@ WebSocket servers handle fragmentation and PING/PONG messages. Servers must wait
 - `server` (ArrayRef[String, Optional[Int]], optional)
 - `subprotocols` (ArrayRef[String], default `[]`)
 - `state` (HashRef, optional)
+  
+#### Handshake Headers and Subprotocols
+The `headers` arrayref **must** include all WebSocket handshake headers as raw byte strings, lower-cased, for example:
+  - `upgrade`, `connection`, `sec-websocket-key`, `sec-websocket-version`, `host`, etc.
+  - `sec-websocket-protocol` (if present)
+The `subprotocols` key is an arrayref of strings parsed from the `Sec-WebSocket-Protocol` header by splitting on commas and trimming whitespace. If the header is absent, `subprotocols` MUST be an empty arrayref.
 
 ### WebSocket Events
 
@@ -148,6 +196,16 @@ Raises server-specific subclass of `OSError`.
 ## Server-Side Events (SSE)
 
 SSE connections stream `text/event-stream` data to clients.
+
+### SSE Connection Detection
+PASGI servers must detect SSE requests and assign a scope of type `sse` when all of the following are true:
+- The HTTP method is `GET`.
+- The `Accept` header includes the media type `text/event-stream`.
+- The request has not been upgraded to WebSocket.
+Otherwise the connection uses a normal `http` scope.
+Routing based on URL or application logic is not used to infer SSE.
+
+### SSE Connection Scope
 
 ### SSE Connection Scope
 

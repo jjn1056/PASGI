@@ -10,11 +10,22 @@ shutdown in the context of a running event loop. An example of this
 would be creating a connection pool and subsequently closing the
 connection pool to release the connections.
 
-Lifespans should be executed once per event loop that will be processing requests.
-In a multi-process environment there will be lifespan events in each process
-and in a multi-threaded environment there will be lifespans for each thread.
-The important part is that lifespans and requests are run in the same event loop
-to ensure that objects like database connection pools are not moved or shared across event loops.
+## Execution Model
+
+Lifespan events **must be sent by every PASGI server instance or worker**
+that manages an application event loop. This ensures that application-level
+resources are initialized and cleaned up in the context in which they run.
+
+- In **multi-process deployments**, each worker process must independently
+  send `lifespan.startup` on init and `lifespan.shutdown` on exit.
+- In **in-process async mode**, the main event loop will send the events.
+
+This matches the ASGI model and ensures that applications have the opportunity
+to manage state correctly in async-safe scopes.
+
+Lifespans and requests **must occur on the same event loop**. This guarantees
+that async-local state (such as DB pools or background tasks) is not shared
+unsafely across threads or processes.
 
 A possible implementation of this protocol in **modern Perl** using `Future::AsyncAwait`
 could look like this:
@@ -63,8 +74,8 @@ The lifespan scope exists for the duration of the event loop.
 The scope information passed in `scope` contains basic metadata:
 
 - `type` (*Unicode string*) – `"lifespan"`.
-- `asgi["version"]` (*Unicode string*) – The version of the PASGI spec.
-- `asgi["spec_version"]` (*Unicode string*) – The version of this spec being
+- `pasgi["version"]` (*Unicode string*) – The version of the PASGI spec.
+- `pasgi["spec_version"]` (*Unicode string*) – The version of this spec being
   used. Optional; if missing defaults to `"1.0"`.
 - `state` Optional(*dict[Unicode string, Any]*) – An empty namespace where
   the application can persist state to be used when handling subsequent requests.
@@ -171,4 +182,5 @@ sees this it should log/print the message provided and then terminate.
 ## Copyright
 
 This document has been placed in the public domain.
+
 

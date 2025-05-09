@@ -67,12 +67,25 @@ Each incoming connection causes the application to be invoked with a `scope` has
     - `tls` => 1 if the connection is over TLS
     - `http2` => 1 if HTTP/2 is in use
     - `max_request_body_size` => maximum accepted request body size (in bytes)
+
+Clarification on PASGI version keys:
+- `version`: Signals the PASGI specification version currently used.
+- `spec_version`: Optionally indicates the version for the specific protocol (such as HTTP or WebSocket) specification, if relevant.
     - ... (server-defined)
 - Additional keys defined per protocol
 
 The scope describes the full lifetime of the connection, and persists until the connection is closed. Some protocols (e.g., HTTP) may treat each request as a distinct scope, while others (e.g., WebSocket) maintain one persistent scope for the entire session.
 
+Specifically:
+- HTTP treats each incoming request (for example, GET or POST requests) as a separate scope that exists only for the life of that request-response cycle. After the response is sent fully, the scope is discarded.
+- WebSocket connection establishes a single scope at connection initiation, persisting for the full duration of the continuous message exchanges until the WebSocket connection closes.
+
 Applications may need to wait for an initial event before sending any messages, depending on the protocol specification.
+
+If the application does not recognize or support `scope->{type}`, it MUST throw an exception. The PASGI server must handle such exceptions gracefully, by closing the connection promptly, optionally logging the issue and providing relevant protocol-specific error responses or messages.
+
+This explicit requirement ensures that servers never assume application-protocol compatibility without explicit support declared by implementations.
+
 
 ### Events
 
@@ -90,11 +103,6 @@ Reserved `type` prefixes include:
 
 Custom user-defined protocols should avoid clashing with these prefixes.
 
-The `type` key in each event must be a namespaced string of the form `protocol.message_type`, such as `http.request` or `websocket.send`. This convention ensures clear protocol dispatching and avoids naming collisions. Each event is a hashref with a mandatory `type` key and additional fields depending on the event.
-
-Applications use:
-
-```perl
 my $event = await $recv->();
 await $send->({ type => 'http.response.start', ... });
 ```
@@ -213,7 +221,15 @@ use Future::AsyncAwait;
 sub middleware ($app) {
     return async sub ($scope, $recv, $send) {
         my $modified_scope = { %$scope, custom => 1 };
-        return await $app->($modified_scope, $recv, $send);
+        return await eval { await $app->($modified_scope, $recv, $send) } or do {
+            my $error = $@;
+            # Middleware MUST propagate exceptions clearly without silently swallowing them.
+            # Optionally, middleware can log or handle the error explicitly before rethrowing.
+            warn "Middleware encountered an application error: $error";
+            die $error;
+        };
+
+        # Middleware should default to shallow cloning and explicitly deep clone if required.
     };
 }
 
@@ -224,6 +240,12 @@ Middleware **must not** mutate the original `$scope` in-place; always clone befo
 ### Cancellation and Disconnects
 
 If the server supports client-driven cancellation (e.g., HTTP/2 resets or WebSocket disconnects), it must send an event such as:
+
+Applications receiving such cancellation events should immediately:
+- Halt unnecessary or resource-intensive processing.
+- Optionally send minimal acknowledgment messages.
+- Execute asynchronous cleanup activities for open resources, connections, or allocated memory.
+- Servers must ensure timely resource cleanup after application cancellation handling has finished.
 
 ```perl
 { type => 'http.disconnect' }
