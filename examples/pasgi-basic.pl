@@ -22,7 +22,7 @@ async sub echo_app ($scope, $receive, $send) {
     await $send->({
         type      => 'http.response.body',
         body      => "You said: $body",
-        more_body => 0,
+        more => 0,
     });
 }
 
