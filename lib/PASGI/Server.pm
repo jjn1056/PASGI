@@ -71,7 +71,7 @@ async sub run ($self) {
     
     # Setup a signal handler for graceful shutdown
     $self->loop->watch_signal(TERM => sub {
-        $self->handle_lifespan_shutdown()->get;
+        $self->handle_lifespan_shutdown()->get unless $self->{no_lifecycle_support};
         $self->loop->stop;
     });
     
@@ -81,7 +81,7 @@ async sub run ($self) {
 
 # Shutdown the server gracefully
 async sub shutdown ($self) {
-    await $self->handle_lifespan_shutdown();
+    await $self->handle_lifespan_shutdown() unless $self->{no_lifecycle_support};
 }
 
 # Handle lifespan.startup event
@@ -110,13 +110,12 @@ async sub handle_lifespan_startup ($self) {
     };
     
     # Try to invoke the app with lifespan scope
-    eval {
-        await $self->{app}->(\%scope, $receive, $send);
-    } or do {
+    eval { await $self->{app}->(\%scope, $receive, $send) } || do {
         my $error = $@;
         # If the application doesn't support lifespan, just continue
         # This allows compatibility with apps that don't handle lifespan
         warn "Note: Application doesn't support lifespan protocol: $error";
+        $self->{no_lifecycle_support} = 1;
     };
 }
 
@@ -225,7 +224,7 @@ async sub handle_request ($self, $request) {
     
     # Invoke user app with closures and handle errors
     eval {
-        await $self->{app}->(\%scope, $receive, $send);
+        await $self->{app}->(\%scope, $receive, $send); 1;
     } or do {
         my $error = $@;
         warn "Application error: $error";
