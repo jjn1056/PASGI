@@ -11,31 +11,29 @@ use PASGI::Server;
 use HTTP::Request;
 use HTTP::Response;
 use IO::Socket::INET;
+use HTTP::Parser;
 
-
-# A simple echo app
+# A simple hello world app
 async sub helloworld_app ($scope, $receive, $send) {
+    die "Invalid scope type" unless $scope->{type} eq 'http';
 
-  die "Invalid scope type" if $scope->{type} ne 'http';
+    await $send->({
+        type    => 'http.response.start',
+        status  => 200,
+        headers => [[ 'content-type', 'text/plain; charset=utf-8' ]],
+    });
+    
+    await $send->({
+        type  => 'http.response.body',
+        body  => 'Hello ',
+        more  => 1,
+    });
 
-  await $send->({
-      type    => 'http.response.start',
-      status  => 200,
-      headers => [[ 'content-type', 'text/plain; charset=utf-8' ]],
-  });
-  
-  await $send->({
-      type  => 'http.response.body',
-      body  => 'Hello ',
-      more  => 1,
-  });
-
-  await $send->({
-      type  => 'http.response.body',
-      body  => 'World!',
-      more  => 0,
-  });
-
+    await $send->({
+        type  => 'http.response.body',
+        body  => 'World!',
+        more  => 0,
+    });
 }
 
 # Setup
@@ -43,38 +41,28 @@ my $CRLF = "\x0d\x0a";
 my $loop = IO::Async::Loop->new();
 testing_loop($loop);
 
-# Create server with our test loop
+# Create server with our test loop - much simpler now!
 my $server = PASGI::Server->new(
-    \&helloworld_app,  # Use the middleware-wrapped app
+    \&helloworld_app,
+    host => '127.0.0.1',
     port => 0,     # Use dynamic port
+    debug => 1,
     loop => $loop,
 );
 
-# Set up the server without running the event loop
-$server->setup->get;
+# Bind server without running the event loop
+$server->bind->get;
 
-# Set up server to listen on localhost
-$server->listen(
-   addr => { 
-       family => "inet", 
-       socktype => "stream", 
-       ip => "127.0.0.1",
-       port => 0,  # Dynamic port assignment
-   },
-   on_listen_error => sub { 
-       die "Test failed early - $_[-1]" 
-   },
-);
-
-# Connect to the server
-my $host = $server->read_handle->sockhost;
-my $port = $server->read_handle->sockport;
+# Get the actual bound address
+my $bound = $server->bound_address;
+my $host = $bound->{host};
+my $port = $bound->{port};
 
 # Helper function to make HTTP requests
 sub make_request {
     my ($method, $path, $body) = @_;
     
-    my $C = IO::Socket::INET->new(
+    my $socket = IO::Socket::INET->new(
         PeerHost => $host,
         PeerPort => $port,
         Timeout  => 2,
@@ -92,52 +80,74 @@ sub make_request {
     }
     
     my $string = $request->as_string($CRLF);
-    $C->syswrite($string);
+    $socket->syswrite($string);
     
-    my $buffer = "";
-    my $timed_out = 0;
-    
+    # Read the complete response
+    my $response_data = '';
     eval {
         wait_for_stream { 
-            # Wait for complete response
-            return 0 unless $buffer =~ m|HTTP/1\.\d \d{3}|;  # Has status line
+            # Read until we have complete headers
+            return 0 unless $response_data =~ m|HTTP/1\.\d \d{3}|;  # Has status line
+            return 0 unless $response_data =~ m|\r\n\r\n|;          # Has complete headers
             
-            # Check for Content-Length
-            my ($len) = $buffer =~ m|Content-Length: (\d+)|i;
-            return 0 unless defined $len;
+            # Check if it's chunked or has content-length
+            my ($chunked) = $response_data =~ m|Transfer-Encoding:\s*chunked|i;
+            my ($content_len) = $response_data =~ m|Content-Length:\s*(\d+)|i;
             
-            # Check for complete body
-            my $header_end = index($buffer, "$CRLF$CRLF");
-            return 0 if $header_end < 0;
-            
-            my $body_length = length($buffer) - ($header_end + 4);
-            return $body_length >= $len;
-        } $C => $buffer;
+            if ($chunked) {
+                # For chunked responses, wait for the final "0\r\n\r\n"
+                return $response_data =~ m|\r\n0\r\n\r\n|;
+            } elsif (defined $content_len) {
+                # For content-length responses, check we have enough data
+                my $header_end = index($response_data, "\r\n\r\n");
+                my $body_length = length($response_data) - ($header_end + 4);
+                return $body_length >= $content_len;
+            } else {
+                # No explicit length - assume complete when headers done
+                # (This handles cases where server closes connection)
+                return 1;
+            }
+        } $socket => $response_data;
     };
-    $timed_out = $@ ? 1 : 0;
     
-    my $res;
-    if ($timed_out) {
-        # Create fake 500 response for testing
-        $res = HTTP::Response->new(
-            500, 
-            "Internal Server Error", 
-            ['Content-Type' => 'text/plain'],
-            "Internal Server Error"
-        );
-    } else {
-        $res = HTTP::Response->parse($buffer);
+    # Continue reading until connection closes (for non-chunked responses without content-length)
+    unless ($response_data =~ m|Transfer-Encoding:\s*chunked|i || $response_data =~ m|Content-Length:|i) {
+        while (my $bytes_read = $socket->sysread(my $more_data, 4096)) {
+            $response_data .= $more_data;
+        }
     }
     
-    $C->close;
-    return $res;
+    $socket->close;
+    
+    # Parse with HTTP::Response - this handles chunked encoding automatically!
+
+    my $parser = HTTP::Parser->new(response => 1);
+    $parser->add($response_data);
+    my $response = $parser->object;
+
+    
+    # If parsing failed, create a basic response
+    unless ($response) {
+        $response = HTTP::Response->new(
+            500, 
+            "Parse Error", 
+            ['Content-Type' => 'text/plain'],
+            "Failed to parse response"
+        );
+    }
+    
+    return $response;
 }
 
 # Now the tests
-subtest 'Hello World' => sub {
+subtest 'Hello World with Streaming' => sub {
     my $res = make_request('GET', '/');
     is $res->code, 200, 'Status 200 OK';
-    like $res->content, qr/Hello World!/, 'Contains expected content';
+    is $res->content, 'Hello World!', 'Contains expected streaming content';
+    is $res->header('Content-Type'), 'text/plain; charset=utf-8', 'Correct content type';
 };
+
+# Clean shutdown
+$server->shutdown->get;
 
 done_testing;
